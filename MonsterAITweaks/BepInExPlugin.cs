@@ -2,14 +2,12 @@
 using BepInEx.Configuration;
 using HarmonyLib;
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
-using UnityEngine.EventSystems;
 
 namespace MonsterAITweaks
 {
-    [BepInPlugin("aedenthorn.MonsterAITweaks", "Monster AI Tweaks", "0.6.0")]
+    [BepInPlugin("aedenthorn.MonsterAITweaks", "Monster AI Tweaks", "0.6.2")]
     public class BepInExPlugin: BaseUnityPlugin
     {
         public static readonly bool isDebug = true;
@@ -98,6 +96,19 @@ namespace MonsterAITweaks
         [HarmonyPatch(typeof(MonsterAI), "Awake")]
         public static class MonsterAI_Awake_Patch
         {
+            public static void Prefix(MonsterAI __instance)
+            {
+                if (!modEnabled.Value)
+                    return;
+
+                if (allMonstersAvoidFire.Value || avoidFireList.Contains(Utils.GetPrefabName(__instance.gameObject)))
+                    __instance.m_avoidFire = true;
+                if (noMonstersTargetPlayers.Value || neverTargetPlayersList.Contains(Utils.GetPrefabName(__instance.gameObject)))
+                    __instance.SetHuntPlayer(false);
+                if (allMonstersFearFire.Value || fearFireList.Contains(Utils.GetPrefabName(__instance.gameObject)))
+                    __instance.m_afraidOfFire = true;
+
+            }
             public static void Postfix(MonsterAI __instance)
             {
                 if (!modEnabled.Value)
@@ -105,11 +116,6 @@ namespace MonsterAITweaks
 
                 if (allMonstersTame.Value || defaultTamedList.Contains(Utils.GetPrefabName(__instance.gameObject)))
                     __instance.MakeTame();
-                if (allMonstersAvoidFire.Value || avoidFireList.Contains(Utils.GetPrefabName(__instance.gameObject)))
-                    __instance.m_avoidFire = true;
-                if (allMonstersFearFire.Value || fearFireList.Contains(Utils.GetPrefabName(__instance.gameObject)))
-                    __instance.m_afraidOfFire = true;
-
             }
         }
         
@@ -230,6 +236,22 @@ namespace MonsterAITweaks
             public static bool Prefix(MonsterAI __instance, bool alert)
             {
                 if (!modEnabled.Value || !alert)
+                    return true;
+
+                if (noMonstersAlerted.Value || neverAlertedList.Contains(Utils.GetPrefabName(__instance.gameObject)))
+                {
+                    return false;
+                }
+                return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(MonsterAI), nameof(MonsterAI.SetHuntPlayer))]
+        public static class MonsterAI_SetHuntPlayer_Patch
+        {
+            public static bool Prefix(MonsterAI __instance, bool hunt)
+            {
+                if (!modEnabled.Value || !hunt)
                     return true;
 
                 if (noMonstersAlerted.Value || neverAlertedList.Contains(Utils.GetPrefabName(__instance.gameObject)))

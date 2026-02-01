@@ -1,6 +1,8 @@
 ﻿using BepInEx;
 using BepInEx.Configuration;
 using HarmonyLib;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -12,7 +14,7 @@ using UnityEngine;
 
 namespace CustomArmorStats
 {
-    [BepInPlugin("aedenthorn.CustomArmorStats", "Custom Armor Stats", "0.7.0")]
+    [BepInPlugin("aedenthorn.CustomArmorStats", "Custom Armor Stats", "0.8.0")]
     public partial class BepInExPlugin : BaseUnityPlugin
     {
         public static BepInExPlugin context;
@@ -34,10 +36,10 @@ namespace CustomArmorStats
             Water = 1024
         }
 
-        public static void Dbgl(string str = "", bool pref = true)
+        public static void Dbgl(object str, BepInEx.Logging.LogLevel level = BepInEx.Logging.LogLevel.Debug)
         {
             if (isDebug.Value)
-                Debug.Log((pref ? typeof(BepInExPlugin).Namespace + " " : "") + str);
+                context.Logger.Log(level, str);
         }
         public void Awake()
         {
@@ -324,7 +326,7 @@ namespace CustomArmorStats
 
             foreach (string file in Directory.GetFiles(assetPath, "*.json"))
             {
-                ArmorData data = JsonUtility.FromJson<ArmorData>(File.ReadAllText(file));
+                ArmorData data = JsonConvert.DeserializeObject<ArmorData>(File.ReadAllText(file));
                 armorDatas.Add(data);
             }
             return armorDatas;
@@ -341,17 +343,77 @@ namespace CustomArmorStats
 
         public static void SetArmorData(ref ItemDrop.ItemData item, ArmorData armor)
         {
-            item.m_shared.m_armor = armor.armor;
-            item.m_shared.m_armorPerLevel = armor.armorPerLevel;
-            item.m_shared.m_movementModifier = armor.movementModifier;
-
-            item.m_shared.m_damageModifiers.Clear();
-            foreach(string modString in armor.damageModifiers)
+            try
             {
-                string[] mod = modString.Split(':');
-                int modType = Enum.TryParse<NewDamageTypes>(mod[0], out NewDamageTypes result) ? (int)result : (int)Enum.Parse(typeof(HitData.DamageType), mod[0]);
-                item.m_shared.m_damageModifiers.Add(new HitData.DamageModPair() { m_type = (HitData.DamageType)modType, m_modifier = (HitData.DamageModifier)Enum.Parse(typeof(HitData.DamageModifier), mod[1]) });
+                item.m_shared.m_armor = armor.armor;
+                item.m_shared.m_armorPerLevel = armor.armorPerLevel;
+                item.m_shared.m_movementModifier = armor.movementModifier;
+
+                item.m_shared.m_damageModifiers.Clear();
+                foreach (string modString in armor.damageModifiers)
+                {
+                    string[] mod = modString.Split(':');
+                    int modType = Enum.TryParse<NewDamageTypes>(mod[0], out NewDamageTypes result) ? (int)result : (int)Enum.Parse(typeof(HitData.DamageType), mod[0]);
+                    item.m_shared.m_damageModifiers.Add(new HitData.DamageModPair() { m_type = (HitData.DamageType)modType, m_modifier = (HitData.DamageModifier)Enum.Parse(typeof(HitData.DamageModifier), mod[1]) });
+                }
+                if (armor.equipStatusEffects != null)
+                {
+                    Dbgl($"Got equip status effects for {armor.name}");
+                    if (item.m_shared.m_equipStatusEffect is null)
+                    {
+                        item.m_shared.m_equipStatusEffect = new SE_Stats();
+                    }
+                    foreach (var kvp in armor.equipStatusEffects)
+                    {
+                        var fi = GetField(kvp.Key);
+                        if (fi != null)
+                        {
+                            fi.SetValue(item.m_shared.m_equipStatusEffect, GetValue(fi, kvp.Value));
+                        }
+                    }
+                }
+                if (armor.setStatusEffects != null)
+                {
+                    Dbgl($"Got set status effects for {armor.name}");
+                    if (item.m_shared.m_setStatusEffect is null)
+                    {
+                        item.m_shared.m_setStatusEffect = new SE_Stats();
+                    }
+                    foreach (var kvp in armor.setStatusEffects)
+                    {
+                        var fi = GetField(kvp.Key);
+                        if (fi != null)
+                        {
+                            fi.SetValue(item.m_shared.m_setStatusEffect, GetValue(fi, kvp.Value));
+                        }
+                    }
+                }
             }
+            catch (Exception e) 
+            {
+                Dbgl($"Error setting data for {armor.name}:\n\n{e.StackTrace}", BepInEx.Logging.LogLevel.Warning);
+            }
+        }
+
+        public static FieldInfo GetField(string key)
+        {
+            var fi = AccessTools.Field(typeof(SE_Stats), key);
+            if (fi == null)
+            {
+                fi = AccessTools.Field(typeof(StatusEffect), key);
+            }
+            return fi;
+        }
+
+        public static object GetValue(FieldInfo fi, object value)
+        {
+            object obj = value;
+            if (fi.FieldType == typeof(Vector3))
+            {
+                var j = value as JObject;
+                obj = new Vector3((float)j["x"], (float)j["y"], (float)j["z"]);
+            }
+            return obj;
         }
 
         public static ArmorData GetArmorDataByName(string armor)
@@ -379,6 +441,23 @@ namespace CustomArmorStats
                 movementModifier = item.m_shared.m_movementModifier,
                 damageModifiers = item.m_shared.m_damageModifiers.Select(m => m.m_type + ":" + m.m_modifier).ToList()
             };
+            if (item.m_shared.m_equipStatusEffect is SE_Stats)
+            {
+                armor.equipStatusEffects = new Dictionary<string, object>();
+                foreach (var fi in typeof(SE_Stats).GetFields())
+                {
+                    armor.equipStatusEffects[fi.Name] = fi.GetValue(item.m_shared.m_equipStatusEffect);
+                }
+            }
+            
+            if (item.m_shared.m_setStatusEffect is SE_Stats)
+            {
+                armor.setStatusEffects = new Dictionary<string, object>();
+                foreach (var fi in typeof(SE_Stats).GetFields())
+                {
+                    armor.setStatusEffects[fi.Name] = fi.GetValue(item.m_shared.m_setStatusEffect);
+                }
+            }
 
             return armor;
         }
@@ -435,7 +514,7 @@ namespace CustomArmorStats
                     if (armorData == null)
                         return false;
                     CheckModFolder();
-                    File.WriteAllText(Path.Combine(assetPath, armorData.name + ".json"), JsonUtility.ToJson(armorData, true));
+                    File.WriteAllText(Path.Combine(assetPath, armorData.name + ".json"), JsonConvert.SerializeObject(armorData, Formatting.Indented));
                     __instance.AddString(text);
                     __instance.AddString($"{context.Info.Metadata.Name} saved armor data to {armor}.json");
                     return false;
@@ -447,7 +526,7 @@ namespace CustomArmorStats
                     ArmorData armorData = GetArmorDataByName(armor);
                     if (armorData == null)
                         return false;
-                    Dbgl(JsonUtility.ToJson(armorData));
+                    Dbgl(JsonConvert.SerializeObject(armorData, Formatting.Indented));
                     __instance.AddString(text);
                     __instance.AddString($"{context.Info.Metadata.Name} dumped {armor}");
                     return false;

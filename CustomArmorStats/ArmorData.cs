@@ -1,4 +1,6 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
+using UnityEngine;
 
 namespace CustomArmorStats
 {
@@ -9,7 +11,8 @@ namespace CustomArmorStats
         public float armor;
         public float armorPerLevel;
         public float movementModifier;
-
         public List<string> damageModifiers = new List<string>();
+        public Dictionary<string, object> equipStatusEffects;
+        public Dictionary<string, object> setStatusEffects;
     }
 }
